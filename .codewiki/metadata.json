@@ -1,0 +1,31 @@
+{
+    "generation_info": {
+        "timestamp": "2026-01-12T02:12:39.501869",
+        "main_model": "qwen3-coder-plus",
+        "generator_version": "1.0.1",
+        "repo_path": "/nfs/site/disks/ssm_lwang85_002/AI/repo-wiki/deepwiki-open",
+        "commit_id": null
+    },
+    "statistics": {
+        "total_components": 138,
+        "leaf_nodes": 48,
+        "max_depth": 2
+    },
+    "files_generated": [
+        "overview.md",
+        "module_tree.json",
+        "first_module_tree.json",
+        "api_rag.md",
+        "api_data_pipeline.md",
+        "api_model_clients.md",
+        "openai_client.md",
+        "azureai_client.md",
+        "openrouter_client.md",
+        "bedrock_client.md",
+        "dashscope_client.md",
+        "google_embedder_client.md",
+        "ollama_patch.md",
+        "api_endpoints.md",
+        "frontend_components.md"
+    ]
+}
