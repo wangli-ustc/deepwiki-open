@@ -37,6 +37,51 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def get_repo_structure(repo_path: str) -> tuple[str, str]:
+    """
+    Get the file tree and README content for a local repository.
+    
+    Args:
+        repo_path: Path to the local repository
+        
+    Returns:
+        Tuple of (file_tree_str, readme_content)
+    """
+    if not os.path.isdir(repo_path):
+        logger.error(f"Directory not found: {repo_path}")
+        return "", ""
+    
+    try:
+        logger.info(f"Processing local repository at: {repo_path}")
+        file_tree_lines = []
+        readme_content = ""
+        
+        for root, dirs, files in os.walk(repo_path):
+            # Exclude hidden dirs/files and virtual envs
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__' and d != 'node_modules' and d != '.venv']
+            for file in files:
+                if file.startswith('.') or file == '__init__.py' or file == '.DS_Store':
+                    continue
+                rel_dir = os.path.relpath(root, repo_path)
+                rel_file = os.path.join(rel_dir, file) if rel_dir != '.' else file
+                file_tree_lines.append(rel_file)
+                # Find README.md (case-insensitive)
+                if file.lower() == 'readme.md' and not readme_content:
+                    try:
+                        with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                            readme_content = f.read()
+                    except Exception as e:
+                        logger.warning(f"Could not read README.md: {str(e)}")
+                        readme_content = ""
+        
+        file_tree_str = '\n'.join(sorted(file_tree_lines))
+        logger.info(f"Generated file tree with {len(file_tree_lines)} files")
+        return file_tree_str, readme_content
+    except Exception as e:
+        logger.error(f"Error processing local repository: {str(e)}")
+        return "", ""
+
+
 @click.group()
 def cli():
     """DeepWiki CLI - Repository processing and embedding generation."""
@@ -151,60 +196,68 @@ def generate(repo_path, repo_type, access_token, model_provider, model, output):
         # Step 5: Generate wiki structure
         click.echo("Generating wiki structure...")
         
-        # Get file tree and README (simplified - in production you'd fetch these properly)
-        file_tree = "Repository file tree will be analyzed by RAG"
-        readme = "README content will be analyzed by RAG"
+        # Get file tree and README from the repository
+        if local_path:
+            file_tree, readme = get_repo_structure(repo_path)
+            if not file_tree:
+                click.echo(click.style("⚠ Warning: Could not read repository structure", fg='yellow'))
+                file_tree = "Repository file tree will be analyzed by RAG"
+                readme = "README content will be analyzed by RAG"
+        else:
+            # For remote repositories, let RAG analyze the structure
+            file_tree = "Repository file tree will be analyzed by RAG"
+            readme = "README content will be analyzed by RAG"
         
         structure_prompt = wiki_generator.create_wiki_structure_prompt(file_tree, readme)
         
-        # Query RAG for context (retrieve relevant documents)
-        logger.info("Querying RAG for wiki structure")
-        retrieved_docs = request_rag.call(structure_prompt, language='en')
+        # # Query RAG for context (retrieve relevant documents)
+        # logger.info("Querying RAG for wiki structure")
+        # retrieved_docs = request_rag.call(structure_prompt, language='en')
         
-        # Format context from retrieved documents
-        context_text = ""
-        if retrieved_docs and retrieved_docs[0].documents:
-            documents = retrieved_docs[0].documents
-            logger.info(f"Retrieved {len(documents)} documents for structure")
-            click.echo(f"  Retrieved {len(documents)} documents:")        
-            # Group documents by file path
-            docs_by_file = {}
-            for doc in documents:
-                file_path = doc.meta_data.get('file_path', 'unknown')
-                if file_path not in docs_by_file:
-                    docs_by_file[file_path] = []
-                docs_by_file[file_path].append(doc)
+        # # Format context from retrieved documents
+        # context_text = ""
+        # if retrieved_docs and retrieved_docs[0].documents:
+        #     documents = retrieved_docs[0].documents
+        #     logger.info(f"Retrieved {len(documents)} documents for structure")
+        #     click.echo(f"  Retrieved {len(documents)} documents:")        
+        #     # Group documents by file path
+        #     docs_by_file = {}
+        #     for doc in documents:
+        #         file_path = doc.meta_data.get('file_path', 'unknown')
+        #         if file_path not in docs_by_file:
+        #             docs_by_file[file_path] = []
+        #         docs_by_file[file_path].append(doc)
 
-            # Format context text with file path grouping
-            context_parts = []
-            for file_path, docs in docs_by_file.items():
-                # Add file header with metadata
-                header = f"## File Path: {file_path}\n\n"
-                # Add document content
-                content = "\n\n".join([doc.text for doc in docs])
+        #     # Format context text with file path grouping
+        #     context_parts = []
+        #     for file_path, docs in docs_by_file.items():
+        #         # Add file header with metadata
+        #         header = f"## File Path: {file_path}\n\n"
+        #         # Add document content
+        #         content = "\n\n".join([doc.text for doc in docs])
 
-                context_parts.append(f"{header}{content}")
+        #         context_parts.append(f"{header}{content}")
 
-            # Join all parts with clear separation
-            context_text = "\n\n" + "-" * 10 + "\n\n".join(context_parts)
+        #     # Join all parts with clear separation
+        #     context_text = "\n\n" + "-" * 10 + "\n\n".join(context_parts)
         # Generate structure using the LLM with context
         from api.config import get_model_config
         model_config = get_model_config(model_provider, model)
         
-        # Create prompt with context
-        full_prompt = f"""<context>
-{context_text}
-</context>
+#         # Create prompt with context
+#         full_prompt = f"""<context>
+# {context_text}
+# </context>
 
-<task>
-{structure_prompt}
-</task>"""
+# <task>
+# {structure_prompt}
+# </task>"""
         
         # Call the generator
         from adalflow.core.types import ModelType
         generator_client = model_config["model_client"]()
         api_kwargs = model_config["model_kwargs"].copy()
-        api_kwargs["messages"] = [{"role": "user", "content": full_prompt}]
+        api_kwargs["messages"] = [{"role": "user", "content": structure_prompt}]
         
         logger.info("Generating wiki structure with LLM")
         structure_response = generator_client.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
@@ -245,33 +298,33 @@ def generate(repo_path, repo_type, access_token, model_provider, model, output):
             # Create page content prompt
             content_prompt = wiki_generator.create_page_content_prompt(page)
             
-            # Query RAG for context
-            logger.info(f"Querying RAG for page content: {page.title}")
-            retrieved_docs = request_rag.call(content_prompt, language='en')
+            # # Query RAG for context
+            # logger.info(f"Querying RAG for page content: {page.title}")
+            # retrieved_docs = request_rag.call(content_prompt, language='en')
             
-            # Format context from retrieved documents
-            context_text = ""
-            if retrieved_docs and retrieved_docs[0].documents:
-                documents = retrieved_docs[0].documents
-                logger.info(f"Retrieved {len(documents)} documents for page")
-                context_parts = []
-                for doc in documents[:15]:  # Limit to top 15 documents for page content
-                    file_path = doc.meta_data.get('file_path', 'unknown')
-                    context_parts.append(f"File: {file_path}\n{doc.text}")
-                context_text = "\n\n---\n\n".join(context_parts)
+#             # Format context from retrieved documents
+#             context_text = ""
+#             if retrieved_docs and retrieved_docs[0].documents:
+#                 documents = retrieved_docs[0].documents
+#                 logger.info(f"Retrieved {len(documents)} documents for page")
+#                 context_parts = []
+#                 for doc in documents[:15]:  # Limit to top 15 documents for page content
+#                     file_path = doc.meta_data.get('file_path', 'unknown')
+#                     context_parts.append(f"File: {file_path}\n{doc.text}")
+#                 context_text = "\n\n---\n\n".join(context_parts)
             
-            # Generate content using the LLM with context
-            full_prompt = f"""<context>
-{context_text}
-</context>
+#             # Generate content using the LLM with context
+#             full_prompt = f"""<context>
+# {context_text}
+# </context>
 
-<task>
-{content_prompt}
-</task>"""
+# <task>
+# {content_prompt}
+# </task>"""
             
             # Call the generator
             api_kwargs = model_config["model_kwargs"].copy()
-            api_kwargs["messages"] = [{"role": "user", "content": full_prompt}]
+            api_kwargs["messages"] = [{"role": "user", "content": content_prompt}]
             
             content_response = generator_client.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
             
@@ -291,7 +344,7 @@ def generate(repo_path, repo_type, access_token, model_provider, model, output):
                 continue
             
             # Clean up markdown delimiters if present
-            page_content = page_content.replace('```markdown', '').replace('```', '')
+            # page_content = page_content.replace('```markdown', '').replace('```', '')
             
             # Write to markdown file
             # Sanitize filename
